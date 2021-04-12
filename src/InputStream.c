@@ -649,17 +649,17 @@ static int sendControllerEventInternal(short controllerNumber, short activeGamep
         // the legacy packet
         holder->packetLength = sizeof(NV_CONTROLLER_PACKET);
         holder->packet.controller.header.packetType = htonl(PACKET_TYPE_CONTROLLER);
-        holder->packet.controller.headerA = C_HEADER_A;
-        holder->packet.controller.headerB = C_HEADER_B;
-        holder->packet.controller.buttonFlags = buttonFlags;
+        holder->packet.controller.headerA = __bswap32(C_HEADER_A);
+        holder->packet.controller.headerB = __bswap16(C_HEADER_B);
+        holder->packet.controller.buttonFlags = __bswap16(buttonFlags);
         holder->packet.controller.leftTrigger = leftTrigger;
         holder->packet.controller.rightTrigger = rightTrigger;
-        holder->packet.controller.leftStickX = leftStickX;
-        holder->packet.controller.leftStickY = leftStickY;
-        holder->packet.controller.rightStickX = rightStickX;
-        holder->packet.controller.rightStickY = rightStickY;
-        holder->packet.controller.tailA = C_TAIL_A;
-        holder->packet.controller.tailB = C_TAIL_B;
+        holder->packet.controller.leftStickX = __bswap16(leftStickX);
+        holder->packet.controller.leftStickY = __bswap16(leftStickY);
+        holder->packet.controller.rightStickX = __bswap16(rightStickX);
+        holder->packet.controller.rightStickY = __bswap16(rightStickY);
+        holder->packet.controller.tailA = __bswap32(C_TAIL_A);
+        holder->packet.controller.tailB = __bswap16(C_TAIL_B);
     }
     else {
         // Generation 4+ servers support passing the controller number
@@ -670,19 +670,20 @@ static int sendControllerEventInternal(short controllerNumber, short activeGamep
         if (AppVersionQuad[0] >= 5) {
             holder->packet.multiController.headerA--;
         }
-        holder->packet.multiController.headerB = MC_HEADER_B;
-        holder->packet.multiController.controllerNumber = controllerNumber;
-        holder->packet.multiController.activeGamepadMask = activeGamepadMask;
-        holder->packet.multiController.midB = MC_MID_B;
-        holder->packet.multiController.buttonFlags = buttonFlags;
+        holder->packet.multiController.headerA = __bswap32(holder->packet.multiController.headerA);
+        holder->packet.multiController.headerB = __bswap16(MC_HEADER_B);
+        holder->packet.multiController.controllerNumber = __bswap16(controllerNumber);
+        holder->packet.multiController.activeGamepadMask = __bswap16(activeGamepadMask);
+        holder->packet.multiController.midB = __bswap16(MC_MID_B);
+        holder->packet.multiController.buttonFlags = __bswap16(buttonFlags);
         holder->packet.multiController.leftTrigger = leftTrigger;
         holder->packet.multiController.rightTrigger = rightTrigger;
-        holder->packet.multiController.leftStickX = leftStickX;
-        holder->packet.multiController.leftStickY = leftStickY;
-        holder->packet.multiController.rightStickX = rightStickX;
-        holder->packet.multiController.rightStickY = rightStickY;
-        holder->packet.multiController.tailA = MC_TAIL_A;
-        holder->packet.multiController.tailB = MC_TAIL_B;
+        holder->packet.multiController.leftStickX = __bswap16(leftStickX);
+        holder->packet.multiController.leftStickY = __bswap16(leftStickY);
+        holder->packet.multiController.rightStickX = __bswap16(rightStickX);
+        holder->packet.multiController.rightStickY = __bswap16(rightStickY);
+        holder->packet.multiController.tailA = __bswap32(MC_TAIL_A);
+        holder->packet.multiController.tailB = __bswap16(MC_TAIL_B);
     }
 
     err = LbqOfferQueueItem(&packetQueue, holder, &holder->entry);

@@ -23,6 +23,7 @@ DWORD (WINAPI *pfnWlanSetInterface)(HANDLE hClientHandle, CONST GUID *pInterface
 
 void addrToUrlSafeString(struct sockaddr_storage* addr, char* string)
 {
+#ifdef AF_INET6
     char addrstr[INET6_ADDRSTRLEN];
 
     if (addr->ss_family == AF_INET6) {
@@ -31,8 +32,12 @@ void addrToUrlSafeString(struct sockaddr_storage* addr, char* string)
 
         // IPv6 addresses need to be enclosed in brackets for URLs
         sprintf(string, "[%s]", addrstr);
-    }
-    else {
+    } else 
+#else
+    char addrstr[INET_ADDRSTRLEN];
+#endif
+
+    {
         struct sockaddr_in* sin = (struct sockaddr_in*)addr;
         inet_ntop(addr->ss_family, &sin->sin_addr, addrstr, sizeof(addrstr));
 
@@ -48,7 +53,7 @@ void shutdownTcpSocket(SOCKET s) {
 }
 
 int setNonFatalRecvTimeoutMs(SOCKET s, int timeoutMs) {
-#if defined(LC_WINDOWS)
+#if defined(LC_WINDOWS) || defined(__WIIU__)
     // Windows says that SO_RCVTIMEO puts the socket
     // into an indeterminate state, so we won't use
     // it for non-fatal socket operations.
@@ -64,6 +69,7 @@ int setNonFatalRecvTimeoutMs(SOCKET s, int timeoutMs) {
 }
 
 void setRecvTimeout(SOCKET s, int timeoutSec) {
+#ifndef __WIIU__
 #if defined(LC_WINDOWS)
     int val = timeoutSec * 1000;
 #else
@@ -75,6 +81,7 @@ void setRecvTimeout(SOCKET s, int timeoutSec) {
     if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&val, sizeof(val)) < 0) {
         Limelog("setsockopt(SO_RCVTIMEO) failed: %d\n", (int)LastSocketError());
     }
+#endif
 }
 
 int pollSockets(struct pollfd* pollFds, int pollFdsCount, int timeoutMs) {
@@ -205,7 +212,11 @@ SOCKET bindUdpSocket(int addrfamily, int bufferSize) {
     struct sockaddr_storage addr;
     int err;
 
-    LC_ASSERT(addrfamily == AF_INET || addrfamily == AF_INET6);
+    LC_ASSERT(addrfamily == AF_INET
+#ifdef AF_INET6
+    || addrfamily == AF_INET6
+#endif
+    );
 
     s = createSocket(addrfamily, SOCK_DGRAM, IPPROTO_UDP, false);
     if (s == INVALID_SOCKET) {
@@ -215,9 +226,12 @@ SOCKET bindUdpSocket(int addrfamily, int bufferSize) {
     memset(&addr, 0, sizeof(addr));
     addr.ss_family = addrfamily;
     if (bind(s, (struct sockaddr*) &addr,
-        addrfamily == AF_INET ?
-        sizeof(struct sockaddr_in) :
-        sizeof(struct sockaddr_in6)) == SOCKET_ERROR) {
+#ifdef AF_INET6
+        addrfamily == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)
+#else
+        sizeof(struct sockaddr_in)
+#endif
+        ) == SOCKET_ERROR) {
         err = LastSocketError();
         Limelog("bind() failed: %d\n", err);
         closeSocket(s);
@@ -305,7 +319,11 @@ SOCKET createSocket(int addressFamily, int socketType, int protocol, bool nonBlo
 
 SOCKET connectTcpSocket(struct sockaddr_storage* dstaddr, SOCKADDR_LEN addrlen, unsigned short port, int timeoutSec) {
     SOCKET s;
+#ifdef AF_INET6
     struct sockaddr_in6 addr;
+#else
+    struct sockaddr_in addr;
+#endif
     struct pollfd pfd;
     int err;
     int val;
@@ -360,7 +378,11 @@ SOCKET connectTcpSocket(struct sockaddr_storage* dstaddr, SOCKADDR_LEN addrlen, 
 
     // Start connection
     memcpy(&addr, dstaddr, addrlen);
+#ifdef AF_INET6
     addr.sin6_port = htons(port);
+#else
+    addr.sin_port = htons(port);
+#endif
     err = connect(s, (struct sockaddr*) &addr, addrlen);
     if (err < 0) {
         err = (int)LastSocketError();
@@ -494,6 +516,7 @@ int resolveHostName(const char* host, int family, int tcpTestPort, struct sockad
     return -1;
 }
 
+#ifdef AF_INET6
 bool isInSubnetV6(struct sockaddr_in6* sin6, unsigned char* subnet, int prefixLength) {
     int i;
     
@@ -506,6 +529,7 @@ bool isInSubnetV6(struct sockaddr_in6* sin6, unsigned char* subnet, int prefixLe
     
     return true;
 }
+#endif
 
 bool isPrivateNetworkAddress(struct sockaddr_storage* address) {
 
@@ -533,6 +557,7 @@ bool isPrivateNetworkAddress(struct sockaddr_storage* address) {
             return true;
         }
     }
+#ifdef AF_INET6
     else if (address->ss_family == AF_INET6) {
         struct sockaddr_in6* sin6 = (struct sockaddr_in6*)address;
         static unsigned char linkLocalPrefix[] = {0xfe, 0x80};
@@ -552,6 +577,7 @@ bool isPrivateNetworkAddress(struct sockaddr_storage* address) {
             return true;
         }
     }
+#endif
 
     return false;
 }
@@ -661,7 +687,7 @@ int initializePlatformSockets(void) {
 #if defined(LC_WINDOWS)
     WSADATA data;
     return WSAStartup(MAKEWORD(2, 0), &data);
-#elif defined(__vita__)
+#elif defined(__vita__) || defined(__WIIU__)
     return 0; // already initialized
 #elif defined(LC_POSIX) && !defined(LC_CHROME)
     // Disable SIGPIPE signals to avoid us getting

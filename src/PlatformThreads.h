@@ -3,6 +3,12 @@
 #include "Limelight.h"
 #include "Platform.h"
 
+#ifdef __WIIU__
+#include <coreinit/thread.h>
+#include <coreinit/mutex.h>
+#include <coreinit/condition.h>
+#endif
+
 typedef void(*ThreadEntry)(void* context);
 
 #if defined(LC_WINDOWS)
@@ -24,6 +30,17 @@ typedef struct _PLT_THREAD {
     int cancelled;
     void *context;
     bool alive;
+} PLT_THREAD;
+#elif defined(__WIIU__)
+typedef OSMutex PLT_MUTEX;
+typedef struct _PLT_EVENT {
+    OSMutex mutex;
+    OSCondition cond;
+    int signalled;
+} PLT_EVENT;
+typedef struct _PLT_THREAD {
+    OSThread thread;
+    int cancelled;
 } PLT_THREAD;
 #elif defined (LC_POSIX)
 typedef pthread_mutex_t PLT_MUTEX;

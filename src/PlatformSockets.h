@@ -89,7 +89,11 @@ typedef socklen_t SOCKADDR_LEN;
 #define LastSocketFail() ((LastSocketError() != 0) ? LastSocketError() : -1)
 
 // IPv6 addresses have 2 extra characters for URL escaping
+#ifdef AF_INET6
 #define URLSAFESTRING_LEN (INET6_ADDRSTRLEN+2)
+#else
+#define URLSAFESTRING_LEN (INET_ADDRSTRLEN+2)
+#endif
 void addrToUrlSafeString(struct sockaddr_storage* addr, char* string);
 
 SOCKET createSocket(int addressFamily, int socketType, int protocol, bool nonBlocking);

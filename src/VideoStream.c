@@ -48,11 +48,16 @@ void destroyVideoStream(void) {
 // UDP Ping proc
 static void UdpPingThreadProc(void* context) {
     char pingData[] = { 0x50, 0x49, 0x4E, 0x47 };
-    struct sockaddr_in6 saddr;
     SOCK_RET err;
-
+#ifdef AF_INET6
+    struct sockaddr_in6 saddr;
     memcpy(&saddr, &RemoteAddr, sizeof(saddr));
     saddr.sin6_port = htons(RTP_PORT);
+#else
+    struct sockaddr_in saddr;
+    memcpy(&saddr, &RemoteAddr, sizeof(saddr));
+    saddr.sin_port = htons(RTP_PORT);
+#endif
 
     while (!PltIsThreadInterrupted(&udpPingThread)) {
         err = sendto(rtpSocket, pingData, sizeof(pingData), 0, (struct sockaddr*)&saddr, RemoteAddrLen);

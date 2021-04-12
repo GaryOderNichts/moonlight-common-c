@@ -1,5 +1,6 @@
 #pragma once
 
+#include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -58,7 +59,11 @@
 #endif
 #endif
 #include <assert.h>
+#ifdef __WIIU__
+#define LC_ASSERT(x) do { if (!(x)) { printf("assert failed %s %s %s\n", #x, __FILE__, __FUNCTION__); assert(0); } } while(0)
+#else
 #define LC_ASSERT(x) assert(x)
+#endif
 #endif
 
 int initializePlatform(void);

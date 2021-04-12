@@ -414,6 +414,12 @@ int RtpfAddPacket(PRTP_FEC_QUEUE queue, PRTP_PACKET packet, int length, PRTPFEC_
 
     PNV_VIDEO_PACKET nvPacket = (PNV_VIDEO_PACKET)(((char*)packet) + dataOffset);
     
+#ifdef BIGENDIAN
+    nvPacket->streamPacketIndex = __bswap32(nvPacket->streamPacketIndex);
+    nvPacket->frameIndex = __bswap32(nvPacket->frameIndex);
+    nvPacket->fecInfo = __bswap32(nvPacket->fecInfo);
+#endif
+
     if (isBefore16(nvPacket->frameIndex, queue->currentFrameNumber)) {
         // Reject frames behind our current frame number
         return RTPF_RET_REJECTED;

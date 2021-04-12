@@ -360,7 +360,11 @@ static bool sendMessageEnet(short ptype, short paylen, const void* payload) {
     }
 
     packet = (PNVCTL_ENET_PACKET_HEADER)enetPacket->data;
+#ifdef BIGENDIAN
+    packet->type = __bswap16(ptype);
+#else
     packet->type = ptype;
+#endif
     memcpy(&packet[1], payload, paylen);
 
     PltLockMutex(&enetMutex);
@@ -390,8 +394,13 @@ static bool sendMessageTcp(short ptype, short paylen, const void* payload) {
         return false;
     }
 
+#ifdef BIGENDIAN
+    packet->type = __bswap16(ptype);
+    packet->payloadLength = __bswap16(paylen);
+#else
     packet->type = ptype;
     packet->payloadLength = paylen;
+#endif
     memcpy(&packet[1], payload, paylen);
 
     err = send(ctlSock, (char*) packet, sizeof(*packet) + paylen, 0);
@@ -684,6 +693,11 @@ static void requestIdrFrame(void) {
 
         payload[2] = 0;
 
+#ifdef BIGENDIAN
+        payload[0] = __bswap64(payload[0]);
+        payload[1] = __bswap64(payload[1]);
+#endif
+
         // Send the reference frame invalidation request and read the response
         if (!sendMessageAndDiscardReply(packetTypes[IDX_INVALIDATE_REF_FRAMES],
             payloadLengths[IDX_INVALIDATE_REF_FRAMES], payload)) {
@@ -727,6 +741,11 @@ static void requestInvalidateReferenceFrames(void) {
         payload[1] = qfit->endFrame;
         free(qfit);
     } while (getNextFrameInvalidationTuple(&qfit));
+
+#ifdef BIGENDIAN
+    payload[0] = __bswap64(payload[0]);
+    payload[1] = __bswap64(payload[1]);
+#endif
 
     // Send the reference frame invalidation request and read the response
     if (!sendMessageAndDiscardReply(packetTypes[IDX_INVALIDATE_REF_FRAMES],
