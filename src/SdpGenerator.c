@@ -142,17 +142,43 @@ static int addGen4Options(PSDP_OPTION* head, char* addrStr) {
 static int addGen5Options(PSDP_OPTION* head) {
     int err = 0;
 
-    // We want to use the new ENet connections for control and input
-    err |= addAttributeString(head, "x-nv-general.useReliableUdp", "1");
-    err |= addAttributeString(head, "x-nv-ri.useControlChannel", "1");
+    if (APP_VERSION_AT_LEAST(7, 1, 431)) {
+        // 0x20 enables audio encryption (which we don't support yet)
+        // 0x80 enables remote input encryption (which we do want)
+        err |= addAttributeString(head, "x-nv-general.featureFlags", "135");
+
+        // Ask for the encrypted control protocol to ensure remote input will be encrypted.
+        // This used to be done via separate RI encryption, but now it is all or nothing.
+        err |= addAttributeString(head, "x-nv-general.useReliableUdp", "13");
+
+        if (StreamConfig.bitrate >= 30000 || StreamConfig.width * StreamConfig.height >= 3840 * 2160) {
+            // HACK: GFE 3.22 will split frames into 2 FEC blocks (sharing a frame number)
+            // if the number of packets exceeds ~120. We can't correctly handle those, so
+            // we'll turn off FEC at bitrates above 30 Mbps as an interim hack.
+            err |= addAttributeString(head, "x-nv-vqos[0].fec.repairPercent", "0");
+            err |= addAttributeString(head, "x-nv-vqos[0].fec.numSrcPackets", "511");
+        }
+        else {
+            err |= addAttributeString(head, "x-nv-vqos[0].fec.repairPercent", "20");
+            err |= addAttributeString(head, "x-nv-vqos[0].fec.numSrcPackets", "125");
+        }
+    }
+    else {
+        // We want to use the new ENet connections for control and input
+        err |= addAttributeString(head, "x-nv-general.useReliableUdp", "1");
+        err |= addAttributeString(head, "x-nv-ri.useControlChannel", "1");
+
+        // When streaming 4K, lower FEC levels to reduce stream overhead
+        if (StreamConfig.width >= 3840 && StreamConfig.height >= 2160) {
+            err |= addAttributeString(head, "x-nv-vqos[0].fec.repairPercent", "5");
+        }
+        else {
+            err |= addAttributeString(head, "x-nv-vqos[0].fec.repairPercent", "20");
+        }
+    }
     
     // Disable dynamic resolution switching
     err |= addAttributeString(head, "x-nv-vqos[0].drc.enable", "0");
-
-    // When streaming 4K, lower FEC levels to reduce stream overhead
-    if (StreamConfig.width >= 3840 && StreamConfig.height >= 2160) {
-        err |= addAttributeString(head, "x-nv-vqos[0].fec.repairPercent", "5");
-    }
 
     // Recovery mode can cause the FEC percentage to change mid-frame, which
     // breaks many assumptions in RTP FEC queue.

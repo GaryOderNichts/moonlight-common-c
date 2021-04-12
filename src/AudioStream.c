@@ -37,12 +37,52 @@ typedef struct _QUEUED_AUDIO_PACKET {
     } q;
 } QUEUED_AUDIO_PACKET, *PQUEUED_AUDIO_PACKET;
 
-// Initialize the audio stream
-void initializeAudioStream(void) {
+static void UdpPingThreadProc(void* context) {
+    // Ping in ASCII
+    char pingData[] = { 0x50, 0x49, 0x4E, 0x47 };
+    struct sockaddr_in6 saddr;
+    SOCK_RET err;
+
+    memcpy(&saddr, &RemoteAddr, sizeof(saddr));
+    saddr.sin6_port = htons(RTP_PORT);
+
+    // Send PING every second until we get data back then every 5 seconds after that.
+    while (!PltIsThreadInterrupted(&udpPingThread)) {
+        err = sendto(rtpSocket, pingData, sizeof(pingData), 0, (struct sockaddr*)&saddr, RemoteAddrLen);
+        if (err != sizeof(pingData)) {
+            Limelog("Audio Ping: sendto() failed: %d\n", (int)LastSocketError());
+            ListenerCallbacks.connectionTerminated(LastSocketFail());
+            return;
+        }
+
+        PltSleepMsInterruptible(&udpPingThread, 500);
+    }
+}
+
+// Initialize the audio stream and start
+int initializeAudioStream(void) {
     LbqInitializeLinkedBlockingQueue(&packetQueue, 30);
     RtpqInitializeQueue(&rtpReorderQueue, RTPQ_DEFAULT_MAX_SIZE, RTPQ_DEFAULT_QUEUE_TIME);
     lastSeq = 0;
     receivedDataFromPeer = false;
+
+    // For GFE 3.22 compatibility, we must start the audio ping thread before the RTSP handshake.
+    // It will not reply to our RTSP PLAY request until the audio ping has been received.
+    rtpSocket = bindUdpSocket(RemoteAddr.ss_family, RTP_RECV_BUFFER);
+    if (rtpSocket == INVALID_SOCKET) {
+        return LastSocketFail();
+    }
+
+    // We may receive audio before our threads are started, but that's okay. We'll
+    // drop the first 1 second of audio packets to catch up with the backlog.
+    int err = PltCreateThread("AudioPing", UdpPingThreadProc, NULL, &udpPingThread);
+    if (err != 0) {
+        closeSocket(rtpSocket);
+        rtpSocket = INVALID_SOCKET;
+        return err;
+    }
+
+    return 0;
 }
 
 static void freePacketList(PLINKED_BLOCKING_QUEUE_ENTRY entry) {
@@ -60,35 +100,17 @@ static void freePacketList(PLINKED_BLOCKING_QUEUE_ENTRY entry) {
 
 // Tear down the audio stream once we're done with it
 void destroyAudioStream(void) {
+    if (rtpSocket != INVALID_SOCKET) {
+        PltInterruptThread(&udpPingThread);
+        PltJoinThread(&udpPingThread);
+        PltCloseThread(&udpPingThread);
+
+        closeSocket(rtpSocket);
+        rtpSocket = INVALID_SOCKET;
+    }
+
     freePacketList(LbqDestroyLinkedBlockingQueue(&packetQueue));
     RtpqCleanupQueue(&rtpReorderQueue);
-}
-
-static void UdpPingThreadProc(void* context) {
-    // Ping in ASCII
-    char pingData[] = { 0x50, 0x49, 0x4E, 0x47 };
-    SOCK_RET err;
-#ifdef AF_INET6
-    struct sockaddr_in6 saddr;
-    memcpy(&saddr, &RemoteAddr, sizeof(saddr));
-    saddr.sin6_port = htons(RTP_PORT);
-#else
-    struct sockaddr_in saddr;
-    memcpy(&saddr, &RemoteAddr, sizeof(saddr));
-    saddr.sin_port = htons(RTP_PORT);
-#endif
-
-    // Send PING every second until we get data back then every 5 seconds after that.
-    while (!PltIsThreadInterrupted(&udpPingThread)) {
-        err = sendto(rtpSocket, pingData, sizeof(pingData), 0, (struct sockaddr*)&saddr, RemoteAddrLen);
-        if (err != sizeof(pingData)) {
-            Limelog("Audio Ping: sendto() failed: %d\n", (int)LastSocketError());
-            ListenerCallbacks.connectionTerminated(LastSocketFail());
-            return;
-        }
-
-        PltSleepMsInterruptible(&udpPingThread, 500);
-    }
 }
 
 static bool queuePacketToLbq(PQUEUED_AUDIO_PACKET* packet) {
@@ -130,7 +152,7 @@ static void ReceiveThreadProc(void* context) {
     PQUEUED_AUDIO_PACKET packet;
     int queueStatus;
     bool useSelect;
-    int packetsToDrop = 500 / AudioPacketDuration;
+    int packetsToDrop = 1000 / AudioPacketDuration;
     int waitingForAudioMs;
 
     packet = NULL;
@@ -190,8 +212,8 @@ static void ReceiveThreadProc(void* context) {
             Limelog("Received first audio packet after %d ms\n", waitingForAudioMs);
         }
 
-        // GFE accumulates audio samples before we are ready to receive them,
-        // so we will drop the first 100 packets to avoid accumulating latency
+        // GFE accumulates audio samples before we are ready to receive them, so
+        // we will drop the first 1 second of packets to avoid accumulating latency
         // by sending audio frames to the player faster than they can be played.
         if (packetsToDrop > 0) {
             packetsToDrop--;
@@ -273,7 +295,6 @@ void stopAudioStream(void) {
 
     AudioCallbacks.stop();
 
-    PltInterruptThread(&udpPingThread);
     PltInterruptThread(&receiveThread);
     if ((AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) == 0) {        
         // Signal threads waiting on the LBQ
@@ -281,21 +302,14 @@ void stopAudioStream(void) {
         PltInterruptThread(&decoderThread);
     }
     
-    PltJoinThread(&udpPingThread);
     PltJoinThread(&receiveThread);
     if ((AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) == 0) {
         PltJoinThread(&decoderThread);
     }
 
-    PltCloseThread(&udpPingThread);
     PltCloseThread(&receiveThread);
     if ((AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) == 0) {
         PltCloseThread(&decoderThread);
-    }
-    
-    if (rtpSocket != INVALID_SOCKET) {
-        closeSocket(rtpSocket);
-        rtpSocket = INVALID_SOCKET;
     }
 
     AudioCallbacks.cleanup();
@@ -324,13 +338,6 @@ int startAudioStream(void* audioContext, int arFlags) {
         return err;
     }
 
-    rtpSocket = bindUdpSocket(RemoteAddr.ss_family, RTP_RECV_BUFFER);
-    if (rtpSocket == INVALID_SOCKET) {
-        err = LastSocketFail();
-        AudioCallbacks.cleanup();
-        return err;
-    }
-
     AudioCallbacks.start();
 
     err = PltCreateThread("AudioRecv", ReceiveThreadProc, NULL, &receiveThread);
@@ -352,32 +359,6 @@ int startAudioStream(void* audioContext, int arFlags) {
             AudioCallbacks.cleanup();
             return err;
         }
-    }
-
-    // Don't start pinging (which will cause GFE to start sending us traffic)
-    // until everything else is started. Otherwise we could accumulate a
-    // bunch of audio packets in the socket receive buffer while our audio
-    // backend is starting up and create audio latency.
-    err = PltCreateThread("AudioPing", UdpPingThreadProc, NULL, &udpPingThread);
-    if (err != 0) {
-        AudioCallbacks.stop();
-        PltInterruptThread(&receiveThread);
-        if ((AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) == 0) {
-            // Signal threads waiting on the LBQ
-            LbqSignalQueueShutdown(&packetQueue);
-            PltInterruptThread(&decoderThread);
-        }
-        PltJoinThread(&receiveThread);
-        if ((AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) == 0) {
-            PltJoinThread(&decoderThread);
-        }
-        PltCloseThread(&receiveThread);
-        if ((AudioCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) == 0) {
-            PltCloseThread(&decoderThread);
-        }
-        closeSocket(rtpSocket);
-        AudioCallbacks.cleanup();
-        return err;
     }
 
     return 0;

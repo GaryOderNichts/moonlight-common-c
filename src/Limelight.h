@@ -325,10 +325,10 @@ void LiInitializeAudioCallbacks(PAUDIO_RENDERER_CALLBACKS arCallbacks);
 #define STAGE_NONE 0
 #define STAGE_PLATFORM_INIT 1
 #define STAGE_NAME_RESOLUTION 2
-#define STAGE_RTSP_HANDSHAKE 3
-#define STAGE_CONTROL_STREAM_INIT 4
-#define STAGE_VIDEO_STREAM_INIT 5
-#define STAGE_AUDIO_STREAM_INIT 6
+#define STAGE_AUDIO_STREAM_INIT 3
+#define STAGE_RTSP_HANDSHAKE 4
+#define STAGE_CONTROL_STREAM_INIT 5
+#define STAGE_VIDEO_STREAM_INIT 6
 #define STAGE_INPUT_STREAM_INIT 7
 #define STAGE_CONTROL_STREAM_START 8
 #define STAGE_VIDEO_STREAM_START 9
@@ -377,9 +377,13 @@ typedef void(*ConnListenerConnectionTerminated)(int errorCode);
 
 // This error is passed to ConnListenerConnectionTerminated() if the stream ends
 // very soon after starting due to a graceful termination from the host. Usually
-// this seems to happen if DRM protected content is on-screen, or another issue
-// that prevents the encoder from being able to capture video successfully.
+// this seems to happen if DRM protected content is on-screen (pre-GFE 3.22), or
+// another issue that prevents the encoder from being able to capture video successfully.
 #define ML_ERROR_UNEXPECTED_EARLY_TERMINATION -102
+
+// This error is passed to ConnListenerConnectionTerminated() if the stream ends
+// due to a protected content error from the host. This value is supported on GFE 3.22+.
+#define ML_ERROR_PROTECTED_CONTENT -103
 
 // This callback is invoked to log debug message
 typedef void(*ConnListenerLogMessage)(const char* format, ...);
