@@ -413,6 +413,10 @@ static bool encryptControlMessage(PNVCTL_ENCRYPTED_PACKET_HEADER encPacket, PNVC
 
     // Encrypt into the space after the encrypted header and GCM tag
     int encryptedSize = sizeof(*packet) + packet->payloadLength;
+#ifdef BIGENDIAN
+    packet->type = __bswap16(packet->type);
+    packet->payloadLength = __bswap16(packet->payloadLength);
+#endif
     if (EVP_EncryptUpdate(cipherContext, ((unsigned char*)(encPacket + 1)) + AES_GCM_TAG_LENGTH,
                           &encryptedSize, (const unsigned char*)packet, encryptedSize) != 1) {
         goto gcm_cleanup;
@@ -444,6 +448,11 @@ static bool decryptControlMessageToV1(PNVCTL_ENCRYPTED_PACKET_HEADER encPacket, 
     unsigned char iv[16];
 
     *packet = NULL;
+
+#ifdef BIGENDIAN
+    encPacket->length = __bswap16(encPacket->length);
+    encPacket->seq = __bswap32(encPacket->seq);
+#endif
 
     // It must be an encrypted packet to begin with
     LC_ASSERT(encPacket->encryptedHeaderType == 0x0001);
@@ -540,6 +549,11 @@ static bool sendMessageEnet(short ptype, short paylen, const void* payload) {
         encPacket->encryptedHeaderType = 0x0001;
         encPacket->length = sizeof(encPacket->seq) + AES_GCM_TAG_LENGTH + sizeof(*packet) + paylen;
         encPacket->seq = currentEnetSequenceNumber++;
+#ifdef BIGENDIAN
+        encPacket->encryptedHeaderType = __bswap16(encPacket->encryptedHeaderType);
+        encPacket->length = __bswap16(encPacket->length);
+        encPacket->seq = __bswap32(encPacket->seq);
+#endif
 
         // Construct the plaintext data for encryption
         LC_ASSERT(sizeof(*packet) + paylen < sizeof(tempBuffer));
@@ -566,7 +580,11 @@ static bool sendMessageEnet(short ptype, short paylen, const void* payload) {
         }
 
         packet = (PNVCTL_ENET_PACKET_HEADER_V1)enetPacket->data;
+#ifdef BIGENDIAN
+        packet->type = __bswap16(ptype);
+#else
         packet->type = ptype;
+#endif
         memcpy(&packet[1], payload, paylen);
     }
 
@@ -754,6 +772,9 @@ static void controlReceiveThreadFunc(void* context) {
             }
 
             ctlHdr = (PNVCTL_ENET_PACKET_HEADER_V1)event.packet->data;
+#ifdef BIGENDIAN
+            ctlHdr->type = __bswap16(ctlHdr->type);
+#endif
 
             if (encryptedControlStream) {
                 // V2 headers can be interpreted as V1 headers for the purpose of examining type,
